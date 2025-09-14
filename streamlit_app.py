@@ -1,6 +1,6 @@
 import streamlit as st
 import time
-from job_winning_interviewer import JobWinningInterviewAgent, api_key
+from interviewer import JobWinningInterviewAgent, api_key
 
 # --- Page Configuration ---
 st.set_page_config(
