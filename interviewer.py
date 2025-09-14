@@ -2,41 +2,30 @@ import os
 import json
 import time
 import google.generativeai as genai
+import streamlit as st
 
 # --- Configuration and Setup ---
-
-# This script assumes the API key is set as an environment variable
-# or Streamlit secret. No changes are needed here.
-
 try:
-    # Attempt to get API key from Streamlit secrets first
-    import streamlit as st
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key:
-        # Fallback to environment variable if not in secrets
         api_key = os.environ.get("GEMINI_API_KEY")
     
     if api_key:
         genai.configure(api_key=api_key)
     else:
-        # This will be handled in the Streamlit app's UI
-        pass
-except (ImportError, ValueError):
-    # Fallback for non-Streamlit environments
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        genai.configure(api_key=api_key)
+        api_key = None
+except Exception as e:
+    print(f"An error occurred during API configuration: {e}")
+    api_key = None
 
 
 class JobWinningInterviewAgent:
     """
-    An enhanced, industry-grade agent with behavioral questions, advanced
-    evaluation, a hint system, and a built-in feedback loop for continuous improvement.
-    (This is the same class as the previous version, optimized for Streamlit integration)
+    The core agent logic, with a corrected prompt for reliable dataset generation.
     """
     def __init__(self, candidate_name, model_name="gemini-1.5-flash"):
         if not api_key:
-            raise ValueError("Gemini API key is not configured.")
+            raise ValueError("Gemini API key is not configured. Please set it in your Streamlit secrets.")
         self.candidate_name = candidate_name
         self.model = genai.GenerativeModel(model_name)
         self.interview_role = None
@@ -60,23 +49,34 @@ class JobWinningInterviewAgent:
             ]
             response = self.model.generate_content(prompt, safety_settings=safety_settings)
             if is_json:
-                text = response.text.strip().replace("```json", "").replace("```", "")
+                text = response.text.strip().lstrip("```json").rstrip("```")
                 return json.loads(text)
             return response.text
         except (json.JSONDecodeError, Exception) as e:
             print(f"--- Model or JSON Error: {e} ---")
             if is_json:
-                return {"error": "Failed to get a valid response from the model."}
-            return "My apologies, there was a system error. Let's move on."
+                return {"error": "Failed to get a valid response from the model.", "scenario": "Error", "dataset_description": "Error"}
+            return "My apologies, I encountered a system error. Let's try the next step."
 
     def _introduce_case_study(self):
+        """
+        UPDATED: This prompt is now much more specific to ensure the AI returns the
+        dataset description in the correct format every time.
+        """
         prompt = f"""
-        You are an AI Interviewer. Your task is to create a realistic business case study to assess a candidate's Excel skills for a '{self.interview_role}' role.
-        The case study needs a simple, text-based dataset with 3-4 columns and a few rows. The data should have some intentional messiness (e.g., extra spaces, inconsistent casing).
-        Return ONLY a JSON object with the scenario and the data description.
+        You are an AI Interviewer creating a case study for a '{self.interview_role}' role.
+        Create a realistic business scenario with a simple, messy, text-based dataset.
+        The dataset description must include column headers and at least 3 sample rows.
+        Return ONLY a JSON object in the following format, with no other text before or after it:
+        {{
+          "scenario": "A detailed business scenario goes here.",
+          "dataset_description": "A description of the dataset columns and a few example rows. For example: 'The dataset has three columns: Product ID, Sale Date, and Revenue. Here are a few rows:\\n- P001 | 2024-01-15 | $ 1500.00\\n- p002 | 2024-01-16 | $950.50\\n- P001 | 2024-01-17| $ 1550.0'"
+        }}
         """
         self.case_study_data = self._call_gemini(prompt, is_json=True)
-        return f"Okay, let's dive into a practical case study.\n\n**Scenario:** {self.case_study_data.get('scenario')}\n\n**Dataset:** {self.case_study_data.get('dataset_description')}\n\nLet's tackle this in a few steps. First, let's talk about cleaning this data."
+        return f"Okay, let's dive into a practical case study.\n\n**Scenario:** {self.case_study_data.get('scenario')}\n\n**Dataset:**\n\n```text\n{self.case_study_data.get('dataset_description')}\n```\n\nLet's tackle this in a few steps. First, let's talk about cleaning this data."
+
+    # ... The rest of the methods remain unchanged ...
 
     def _ask_next_question(self, skill_to_test):
         prompt = f"""
@@ -131,8 +131,6 @@ class JobWinningInterviewAgent:
     def _ask_and_evaluate_behavioral(self):
         prompt = "Ask one standard behavioral interview question, like 'Tell me about a challenging project' or 'Describe a time you made a mistake'."
         question = self._call_gemini(prompt)
-        
-        # This will be handled by the Streamlit app, which will get an answer and then call the evaluation part.
         return question
 
     def evaluate_behavioral_answer(self, question, answer):
@@ -169,7 +167,6 @@ class JobWinningInterviewAgent:
         """
         final_report = self._call_gemini(summary_prompt)
 
-        # Create feedback log as well
         feedback_data = {
             "candidate_name": self.candidate_name,
             "interview_role": self.interview_role,
@@ -179,9 +176,11 @@ class JobWinningInterviewAgent:
             "timestamp": time.time()
         }
         filename = f"interview_log_{self.candidate_name.replace(' ','_')}_{int(time.time())}.json"
-        with open(filename, 'w') as f:
-            json.dump(feedback_data, f, indent=4)
-        print(f"--- [Admin] Interview data saved to '{filename}' for quality review. ---")
+        try:
+            with open(filename, 'w') as f:
+                json.dump(feedback_data, f, indent=4)
+            print(f"--- [Admin] Interview data saved to '{filename}' for quality review. ---")
+        except Exception as e:
+            print(f"Could not save feedback log: {e}")
         
         return final_report
-
