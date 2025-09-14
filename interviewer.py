@@ -2,7 +2,6 @@ import os
 import json
 import time
 import google.generativeai as genai
-from IPython.display import display, Markdown
 
 # --- Configuration and Setup ---
 
